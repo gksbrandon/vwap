@@ -6,44 +6,56 @@ import (
 	"log"
 
 	"github.com/gksbrandon/vwap/internal/aggregator"
-	"github.com/gksbrandon/vwap/internal/exchange/coinbase"
+	"github.com/gksbrandon/vwap/internal/exchange"
 	"github.com/gksbrandon/vwap/internal/helper"
 )
 
 const (
 	defaultTradingPairs = "BTC-USD, ETH-USD, ETH-BTC"
 	defaultWindowSize   = 200
-	tradingPairsRegex   = `^([A-Z]{3}\-[A-Z]{3},)*([A-Z]{3}\-[A-Z]{3})$`
+	defaultExchange     = "coinbase"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Command Line Flags
-	tradingPairs := flag.String("trading-pairs", defaultTradingPairs, "Trading pairs to subscribe to")
-	windowSize := flag.Int("window-size", defaultWindowSize, "Window Size for VWAP calculation")
+	tradingPairsFlag := flag.String("trading-pairs", defaultTradingPairs, "Trading pairs to subscribe to")
+	windowSizeFlag := flag.Int("window-size", defaultWindowSize, "Window Size for VWAP calculation")
+	exchangeFlag := flag.String("exchange", defaultExchange, "Exchange to stream trading data from")
 	flag.Parse()
 
-	// Validate Flags
-	pairs := helper.ValidateTradingPairs(tradingPairs)
-
-	// Intercepting shutdown signals.
-	go helper.InterceptShutdownSignals()
-
-	// Initialize trading pair channel map and aggregator for each pair
-	tradingPairsChannelMap := make(map[string]chan *aggregator.Match)
-	for _, name := range pairs {
-		aggregator, incomingMatches := aggregator.NewPair(name, *windowSize)
-		go aggregator.ListenForNewMatch(incomingMatches)
-		tradingPairsChannelMap[name] = incomingMatches
+	// Validate & Split Trading Pairs Flag string ("ABC-XYZ, BCD-EFG") to Array ["ABC-XYZ", "BCD-EFG"]
+	tradingPairs, err := helper.ValidateTradingPairs(tradingPairsFlag)
+	if err != nil {
+		log.Fatalf("Invalid Trading Pairs provided: %v", err)
 	}
 
-	// Subscribe to "matches" channel
-	incomingMessages := make(chan coinbase.Response)
-	client := coinbase.Client{}
-	client.Subscribe(ctx, incomingMessages, pairs)
+	// Intercepting shutdown signals -- for graceful shutdown with Ctrl-c
+	go helper.InterceptShutdownSignals()
 
-	// Receive data from exchange, send to respective aggregator
+	// Initialize exchange
+	// Addional exchanges can be created from implementing the Client interface
+	// And switching cases between them eg. ex.Client = &exchange.Binance
+	ex := &exchange.Exchange{}
+	switch *exchangeFlag {
+	case "coinbase":
+		ex.Client = &exchange.Coinbase{}
+	default:
+		log.Fatal("Please choose exchange from list: (coinbase)")
+	}
+
+	// Subscribe to exchange
+	incomingMessages := make(chan exchange.Response)
+	ex.Subscribe(ctx, incomingMessages, tradingPairs)
+
+	// Initialize trading pair channel map and aggregator for each trading pair
+	// Trading pair aggregator acts as receiver for respective trading pair
+	// VWAP is then calculated and printed to screen
+	ag := &aggregator.Aggregator{}
+	ag.InitializeReceivers(tradingPairs, *windowSizeFlag)
+
+	// Receive data from subscribed channel in exchange, and send to respective aggregator
 	for msg := range incomingMessages {
 		m := &aggregator.Match{
 			ProductID: msg.ProductID,
@@ -51,7 +63,7 @@ func main() {
 			Price:     msg.Price,
 		}
 
-		c, ok := tradingPairsChannelMap[m.ProductID]
+		c, ok := ag.Matches[m.ProductID]
 		if !ok {
 			log.Println(m)
 			log.Printf("no pair found for %s\n", m.ProductID)

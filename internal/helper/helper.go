@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -21,13 +22,13 @@ func InterceptShutdownSignals() {
 	os.Exit(0)
 }
 
-func ValidateTradingPairs(pairs *string) []string {
+func ValidateTradingPairs(pairs *string) ([]string, error) {
 	whitespaceRemoved := strings.ReplaceAll(*pairs, " ", "")
 
 	r, _ := regexp.Compile(tradingPairsRegex)
 	if !r.MatchString(whitespaceRemoved) {
-		log.Fatal("Invalid Trading Pairs provided")
+		return nil, fmt.Errorf("Invalid Trading Pairs provided")
 	}
 
-	return strings.Split(whitespaceRemoved, ",")
+	return strings.Split(whitespaceRemoved, ","), nil
 }

@@ -1,4 +1,4 @@
-package coinbase
+package exchange
 
 import (
 	"context"
@@ -14,11 +14,11 @@ const (
 	wsURL  = "wss://ws-feed.exchange.coinbase.com"
 )
 
-type Client struct {
+type Coinbase struct {
 	Conn *websocket.Conn
 }
 
-type Request struct {
+type SubRequest struct {
 	Type       RequestType `json:"type"`
 	ProductIDs []string    `json:"product_ids"`
 	Channels   []Channel   `json:"channels"`
@@ -26,7 +26,7 @@ type Request struct {
 
 type RequestType string
 
-type Response struct {
+type SubResponse struct {
 	Type      string    `json:"type"`
 	Channels  []Channel `json:"channels"`
 	Message   string    `json:"message,omitempty"`
@@ -41,61 +41,51 @@ type Channel struct {
 }
 type ChannelType string
 
-func (c *Client) Connect() error {
+func (c Coinbase) Subscribe(ctx context.Context, ch chan Response, pairs []string) {
 	conn, err := websocket.Dial(wsURL, "", origin)
 	if err != nil {
-		return err
+		log.Fatal(fmt.Errorf("Websocket connected to websocket: %s, error: %v", wsURL, err))
 	}
-	c.Conn = conn
-
 	log.Printf("Websocket connected to: %s", wsURL)
-	return nil
-}
 
-func (c *Client) Subscribe(ctx context.Context, ch chan Response, pairs []string) {
-	err := c.Connect()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	subscriptionRequest := Request{
+	subRequest := SubRequest{
 		Type:       "subscribe",
 		ProductIDs: pairs,
 		Channels:   []Channel{{Name: "matches"}},
 	}
 
-	payload, err := json.Marshal(subscriptionRequest)
+	payload, err := json.Marshal(subRequest)
 	if err != nil {
 		log.Fatal(fmt.Errorf("Failed to marshal subscription: %w", err))
 	}
 
-	err = websocket.Message.Send(c.Conn, payload)
+	err = websocket.Message.Send(conn, payload)
 	if err != nil {
 		log.Fatal(fmt.Errorf("Failed to send subscription message: %w", err))
 	}
 
-	var subscriptionResponse Response
-	err = websocket.JSON.Receive(c.Conn, &subscriptionResponse)
+	var subResponse SubResponse
+	err = websocket.JSON.Receive(conn, &subResponse)
 	if err != nil {
 		log.Fatal(fmt.Errorf("Failed to write subscribe message: %w", err))
 	}
 
-	if subscriptionResponse.Type == "error" {
-		log.Fatal(fmt.Errorf("Failed to subscribe, error message: %s", subscriptionResponse.Message))
+	if subResponse.Type == "error" {
+		log.Fatal(fmt.Errorf("Failed to subscribe, error message: %s", subResponse.Message))
 	}
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				err := c.Conn.Close()
+				err := conn.Close()
 				if err != nil {
 					log.Printf("Failed closing websocket connection: %s", err)
 				}
 
 			default:
 				message := &Response{}
-				err := websocket.JSON.Receive(c.Conn, message)
+				err := websocket.JSON.Receive(conn, message)
 				if err != nil {
 					log.Printf("Failed receiving message: %s", err)
 					break

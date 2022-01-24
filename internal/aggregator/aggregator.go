@@ -7,6 +7,10 @@ import (
 	"strconv"
 )
 
+type Aggregator struct {
+	Matches map[string]chan *Match
+}
+
 type Pair struct {
 	PairName                            string
 	SizedPrices                         []*SizedPrice
@@ -25,20 +29,33 @@ type Match struct {
 	Price     string `json:"price"`
 }
 
-func NewPair(pairName string, windowSize int) (*Pair, chan *Match) {
+// Creates a mapping for each trading pair to a Receiver Matches channel
+func (a *Aggregator) InitializeReceivers(tradingPairs []string, windowSize int) {
+	a.Matches = make(map[string]chan *Match)
+	for _, name := range tradingPairs {
+		pair, incomingMatches := newPair(name, windowSize)
+		go pair.listenForNewMatch(incomingMatches)
+		a.Matches[name] = incomingMatches
+	}
+}
+
+// Creates a new pair and channel map
+func newPair(pairName string, windowSize int) (*Pair, chan *Match) {
 	return &Pair{
 		PairName:   pairName,
 		WindowSize: windowSize,
 	}, make(chan *Match)
 }
 
-func (pa *Pair) ListenForNewMatch(c chan *Match) {
+// Channel listening for a pair match, then updating, calculating and printing VWAP
+func (p *Pair) listenForNewMatch(c chan *Match) {
 	for m := range c {
-		pa.update(m)
-		pa.printVWAP()
+		p.update(m)
+		p.printVWAP()
 	}
 }
 
+// Updates new pair match data received from channel
 func (pa *Pair) update(m *Match) {
 	if len(pa.SizedPrices) == pa.WindowSize {
 		pa.removeOldest()
@@ -48,26 +65,6 @@ func (pa *Pair) update(m *Match) {
 		panic(err)
 	}
 	pa.add(sp)
-}
-
-func (pa *Pair) printVWAP() {
-	log.Printf("%s VWAP %f\n", pa.PairName, pa.vwap())
-}
-
-func (pa *Pair) removeOldest() {
-	oldest := pa.SizedPrices[0]
-	pa.TotalSize -= oldest.Size
-	pa.TotalVolumeWeightedPrice -= oldest.Size * oldest.Size
-}
-
-func (pa *Pair) add(sp *SizedPrice) {
-	pa.SizedPrices = append(pa.SizedPrices, sp)
-	pa.TotalSize += sp.Size
-	pa.TotalVolumeWeightedPrice += sp.Size * sp.Price
-}
-
-func (pa *Pair) vwap() float64 {
-	return pa.TotalVolumeWeightedPrice / pa.TotalSize
 }
 
 func toSizedPrice(m *Match) (*SizedPrice, error) {
@@ -86,4 +83,24 @@ func toSizedPrice(m *Match) (*SizedPrice, error) {
 		Size:  size,
 		Price: price,
 	}, nil
+}
+
+func (pa *Pair) removeOldest() {
+	oldest := pa.SizedPrices[0]
+	pa.TotalSize -= oldest.Size
+	pa.TotalVolumeWeightedPrice -= oldest.Size * oldest.Size
+}
+
+func (pa *Pair) printVWAP() {
+	log.Printf("%s VWAP %f\n", pa.PairName, pa.vwap())
+}
+
+func (pa *Pair) add(sp *SizedPrice) {
+	pa.SizedPrices = append(pa.SizedPrices, sp)
+	pa.TotalSize += sp.Size
+	pa.TotalVolumeWeightedPrice += sp.Size * sp.Price
+}
+
+func (pa *Pair) vwap() float64 {
+	return pa.TotalVolumeWeightedPrice / pa.TotalSize
 }
