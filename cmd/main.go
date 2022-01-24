@@ -34,6 +34,12 @@ func main() {
 	// Intercepting shutdown signals -- for graceful shutdown with Ctrl-c
 	go helper.InterceptShutdownSignals()
 
+	// Initialize trading pair channel map and aggregator for each trading pair
+	// Trading pair aggregator acts as receiver for respective trading pair
+	// VWAP is then calculated and printed to screen
+	ag := &aggregator.Aggregator{}
+	ag.InitializeReceivers(tradingPairs, *windowSizeFlag)
+
 	// Initialize exchange
 	// Addional exchanges can be created from implementing the Client interface
 	// And switching cases between them eg. ex.Client = &exchange.Binance
@@ -48,12 +54,6 @@ func main() {
 	// Subscribe to exchange
 	incomingMessages := make(chan exchange.Response)
 	ex.Subscribe(ctx, incomingMessages, tradingPairs)
-
-	// Initialize trading pair channel map and aggregator for each trading pair
-	// Trading pair aggregator acts as receiver for respective trading pair
-	// VWAP is then calculated and printed to screen
-	ag := &aggregator.Aggregator{}
-	ag.InitializeReceivers(tradingPairs, *windowSizeFlag)
 
 	// Receive data from subscribed channel in exchange, and send to respective aggregator
 	for msg := range incomingMessages {
