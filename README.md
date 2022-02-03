@@ -19,10 +19,9 @@ Uses an aggregator design pattern for gathering data from the exchange. Two main
    - Responsible for aggregating data collected into separate trading pairs channels
    - Then calculating VWAP of the trading pair and printing the results respectively
 2. exchange
-   - Responsible for connecting, subscribing and receiving websocket data from coinbase exchange
+   - Interface responsible for connecting, subscribing and receiving websocket data from exchanges
    - Currently takes coinbase as default exchange
 
 # Future plans
-- exchanges interface to support different exchanges
 - unit & integration testing
 - kafka support
